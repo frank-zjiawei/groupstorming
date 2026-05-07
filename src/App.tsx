@@ -70,6 +70,34 @@ export default function App() {
   // Goal editing
   const [isEditingGoal, setIsEditingGoal] = useState(false);
 
+  // Inline rename of a detected speaker (e.g. "Speaker 1" → "Frank").
+  // Replaces the author across messages, bubbles, timeline, distilled, etc.
+  const [editingContributor, setEditingContributor] = useState<string | null>(null);
+  const [editingContributorValue, setEditingContributorValue] = useState('');
+
+  const renameAuthor = (oldName: string, rawNewName: string) => {
+    const newName = rawNewName.trim();
+    if (!newName || newName === oldName) {
+      setEditingContributor(null);
+      return;
+    }
+    pushSnapshot();
+    setMessages(prev => prev.map(m => (m.author === oldName ? { ...m, author: newName } : m)));
+    setBubbles(prev => prev.map(b => ({
+      ...b,
+      contributors: b.contributors.map(c => (c === oldName ? newName : c)),
+    })));
+    setLinks(prev => prev); // links don't reference contributors
+    setTimelineEvents(prev => prev.map(e => (e.author === oldName ? { ...e, author: newName } : e)));
+    if (distilledBubbles) {
+      setDistilledBubbles(prev => prev ? prev.map(b => ({
+        ...b,
+        contributors: b.contributors.map(c => (c === oldName ? newName : c)),
+      })) : null);
+    }
+    setEditingContributor(null);
+  };
+
   // Transcript modal
   const [showTranscript, setShowTranscript] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -230,17 +258,6 @@ export default function App() {
     return `${hrs.toString().padStart(2, '0')} hr ${mins.toString().padStart(2, '0')} min`;
   };
 
-  const [activeSpeaker, setActiveSpeaker] = useState("Participant A");
-  const activeSpeakerRef = useRef(activeSpeaker);
-
-  // Default active speaker to the first contributor once entered
-  useEffect(() => {
-    const firstName = sessionMetadata.contributors.split(',').map(n => n.trim()).filter(Boolean)[0];
-    if (firstName && activeSpeaker === 'Participant A') {
-      setActiveSpeaker(firstName);
-    }
-  }, [sessionMetadata.contributors]);
-
   const [isQuerying, setIsQuerying] = useState(false);
   const [showPositiveWarning, setShowPositiveWarning] = useState(false);
 
@@ -291,10 +308,6 @@ export default function App() {
     }
   }, [messages]);
 
-  useEffect(() => {
-    activeSpeakerRef.current = activeSpeaker;
-  }, [activeSpeaker]);
-
   const [isFirstTimeUser, setIsFirstTimeUser] = useState(false);
 
   const handleStartSession = () => {
@@ -304,12 +317,6 @@ export default function App() {
     }
     setHasStarted(true);
   };
-
-  const contributorNames = sessionMetadata.contributors
-    .split(',')
-    .map(n => n.trim())
-    .filter(n => n);
-
 
 
   const handleMergeBubbles = (sourceId: string, targetId: string) => {
@@ -642,10 +649,10 @@ export default function App() {
 
   const { isConnected, connect, disconnect, interimTranscript, connectError, clearConnectError } = useLiveAgent(
     handleNewTranscription,
-    () => activeSpeakerRef.current,
+    () => '', // unused — Deepgram provides speaker labels directly
     handleFrameworkSuggested,
     handleVisualizationAction,
-    contributorNames,
+    [], // No pre-set contributor names — Deepgram emits "Speaker 1/2/3" labels which user can rename in the sidebar
   );
 
   // Auto scroll transcript
@@ -811,16 +818,17 @@ export default function App() {
   // Build a stable, alphabetically-sorted list of all human contributors seen in
   // the session. Index into a palette by this sort order — guarantees visually
   // distinct colors as long as we have <= palette length contributors.
+  // Preserve INSERTION order (not alphabetical) so a rename doesn't shuffle
+  // every speaker's color — the renamed entry takes the same slot.
   const knownContributors = (() => {
     const set = new Set<string>();
-    sessionMetadata.contributors.split(',').map(n => n.trim()).filter(Boolean).forEach(n => set.add(n));
     messages.forEach(m => {
       if (m.author && !m.author.includes('AI') && m.author !== 'Query' && m.author !== 'Uploaded Transcript') set.add(m.author);
     });
     bubbles.forEach(b => b.contributors.forEach(c => {
-      if (c && !c.includes('AI') && c !== 'unknown' && c !== 'Distilled' && c !== 'Participant A') set.add(c);
+      if (c && !c.includes('AI') && c !== 'unknown' && c !== 'Distilled') set.add(c);
     }));
-    return Array.from(set).sort();
+    return Array.from(set);
   })();
 
   const getAuthorColor = (author: string) => {
@@ -903,31 +911,20 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-widest flex items-center gap-2">
-                  <Users className="w-3 h-3" /> Contributors
-                </label>
-                <input 
-                  type="text"
-                  value={sessionMetadata.contributors}
-                  onChange={e => setSessionMetadata({...sessionMetadata, contributors: e.target.value})}
-                  placeholder="Who're brainstorming today?"
-                  className="w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/15 rounded-xl focus:ring-2 focus:ring-[#aba6de]/40 focus:border-[#aba6de]/60 outline-none transition-all text-sm font-medium text-white placeholder:text-white/35"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-widest flex items-center gap-2">
-                  <PenTool className="w-3 h-3" /> Goal
-                </label>
-                <input 
-                  type="text"
-                  value={sessionMetadata.goal}
-                  onChange={e => setSessionMetadata({...sessionMetadata, goal: e.target.value})}
-                  placeholder="What do we want to achieve?"
-                  className="w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/15 rounded-xl focus:ring-2 focus:ring-[#aba6de]/40 focus:border-[#aba6de]/60 outline-none transition-all text-sm font-medium text-white placeholder:text-white/35"
-                />
-              </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-widest flex items-center gap-2">
+                <PenTool className="w-3 h-3" /> Goal
+              </label>
+              <input
+                type="text"
+                value={sessionMetadata.goal}
+                onChange={e => setSessionMetadata({ ...sessionMetadata, goal: e.target.value })}
+                placeholder="What do we want to achieve?"
+                className="w-full px-4 py-3 bg-white/5 backdrop-blur-sm border border-white/15 rounded-xl focus:ring-2 focus:ring-[#aba6de]/40 focus:border-[#aba6de]/60 outline-none transition-all text-sm font-medium text-white placeholder:text-white/35"
+              />
+              <p className="text-[10px] text-white/45 italic px-1">
+                Speakers are detected automatically when recording. Rename Speaker 1 / 2 / 3 anytime in the sidebar.
+              </p>
             </div>
 
             <label className="flex items-center gap-2.5 px-1 cursor-pointer select-none group">
@@ -1300,29 +1297,68 @@ export default function App() {
             
             {bubbles.length > 0 && (
               <div>
-                <div className="text-[9px] font-mono font-bold text-white/80 uppercase tracking-[0.2em] mb-2">Contributors</div>
+                <div className="text-[9px] font-mono font-bold text-white/80 uppercase tracking-[0.2em] mb-2">Speakers</div>
                 <div className="space-y-1.5">
-                  {Array.from(new Set<string>(bubbles.flatMap(b => b.contributors))).map(contributor => {
-                    const color = getAuthorBg(contributor);
-                    const isFiltering = speakerFilter === contributor;
+                  {Array.from(new Set<string>(bubbles.flatMap(b => b.contributors)))
+                    .filter(c => c && c !== 'unknown' && c !== 'Distilled')
+                    .map(contributor => {
+                      const color = getAuthorBg(contributor);
+                      const isFiltering = speakerFilter === contributor;
+                      const isEditing = editingContributor === contributor;
 
-                    return (
-                      <button 
-                        key={contributor} 
-                        onClick={() => setSpeakerFilter(isFiltering ? null : contributor)}
-                        className={`flex items-center gap-2 group w-full text-left transition-all p-1 rounded-md ${isFiltering ? 'bg-white/20' : 'hover:bg-white/10'}`}
-                      >
-                        <div 
-                          className="w-3 h-3 rounded-full transition-transform group-hover:scale-110 shrink-0" 
-                          style={{ backgroundColor: color }} 
-                        />
-                        <span className="text-[11px] font-bold text-white tracking-tight">{contributor}</span>
-                        {isFiltering && <div className="ml-auto w-1 h-1 bg-white rounded-full" />}
-                      </button>
-                    );
-                  })}
+                      if (isEditing) {
+                        return (
+                          <div key={contributor} className="flex items-center gap-2 p-1 rounded-md bg-white/15">
+                            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editingContributorValue}
+                              onChange={e => setEditingContributorValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') renameAuthor(contributor, editingContributorValue);
+                                if (e.key === 'Escape') setEditingContributor(null);
+                              }}
+                              onBlur={() => renameAuthor(contributor, editingContributorValue)}
+                              className="flex-1 min-w-0 bg-white/20 backdrop-blur-sm border border-white/30 rounded px-1.5 py-0.5 text-[11px] font-bold text-white outline-none focus:border-white"
+                            />
+                            <button
+                              onMouseDown={(e) => { e.preventDefault(); renameAuthor(contributor, editingContributorValue); }}
+                              className="p-0.5 rounded bg-white/25 hover:bg-white/40 text-white shrink-0"
+                              title="Save"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={contributor}
+                          className={`group flex items-center gap-2 transition-all p-1 rounded-md ${isFiltering ? 'bg-white/20' : 'hover:bg-white/10'}`}
+                        >
+                          <button
+                            onClick={() => setSpeakerFilter(isFiltering ? null : contributor)}
+                            className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                            title={isFiltering ? `Click to show all speakers` : `Filter canvas to ${contributor} only`}
+                          >
+                            <div className="w-3 h-3 rounded-full transition-transform group-hover:scale-110 shrink-0" style={{ backgroundColor: color }} />
+                            <span className="text-[11px] font-bold text-white tracking-tight truncate">{contributor}</span>
+                            {isFiltering && <div className="ml-auto w-1 h-1 bg-white rounded-full" />}
+                          </button>
+                          <button
+                            onClick={() => { setEditingContributor(contributor); setEditingContributorValue(contributor); }}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/20 text-white/70 hover:text-white transition-all shrink-0"
+                            title={`Rename ${contributor}`}
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
                 </div>
-                <div className="mt-2 text-[8px] text-white/60 italic">(click on each of them to check respective inputs)</div>
+                <div className="mt-2 text-[8px] text-white/60 italic">Click pencil to rename · click name to filter</div>
               </div>
             )}
           </div>
@@ -1420,16 +1456,9 @@ export default function App() {
 
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-5 px-8 text-center">
-              {contributorNames.length > 0 && (
-                <div className="text-[11px] text-zinc-400 leading-tight">
-                  {contributorNames.map((name, i) => (
-                    <React.Fragment key={name}>
-                      <span className={`font-semibold ${getAuthorColor(name)}`}>{name}</span>
-                      {i < contributorNames.length - 1 && <span className="text-zinc-300">, </span>}
-                    </React.Fragment>
-                  ))}
-                  <span className="text-zinc-400"> joined the session{sessionMetadata.goal ? ` for: ` : '.'}</span>
-                  {sessionMetadata.goal && <span className="font-medium text-zinc-500 italic">{sessionMetadata.goal}</span>}
+              {sessionMetadata.goal && (
+                <div className="text-[11px] text-zinc-400 leading-tight italic">
+                  {sessionMetadata.goal}
                 </div>
               )}
 
