@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-brand-50: #f8fafc;
+  --color-brand-100: #f1f5f9;
+  --color-brand-200: #e2e8f0;
+  --color-brand-500: #94a3b8;
+  --color-paper: #ffffff;
+  
+  /* Pastel Palette from User Image */
+  --pastel-green: #bdd0c4;
+  --pastel-blue: #9ab7d3;
+  --pastel-pink: #f5d2d3;
+  --pastel-peach: #f7e1d3;
+  --pastel-lavender: #dfccf1;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #fbfbfc;
+  color: #334155;
+}
+
+/* Custom crisp scrollbar for tech feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}

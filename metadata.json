@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Groupstorming",
+  "description": "An AI agent that supports structured thinking by analyzing group discussions via microphone meeting recordings, identifying themes, and prompting convergence.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
