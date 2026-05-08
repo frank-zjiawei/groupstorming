@@ -1295,13 +1295,31 @@ export default function App() {
               </div>
             </div>
             
-            {bubbles.length > 0 && (
+            {(() => {
+              // Aggregate speakers from BOTH transcript messages AND bubble
+              // contributors. A speaker may exist in messages before any bubble
+              // has been created for them (8s analyzer interval), so listing
+              // only bubble contributors misses them.
+              const detected = (() => {
+                const set = new Set<string>();
+                messages.forEach(m => {
+                  if (m.author && m.author !== 'unknown' && m.author !== 'Distilled'
+                      && m.author !== 'Query' && m.author !== 'Uploaded Transcript'
+                      && m.author !== 'AI' && m.author !== 'AI Facilitator') {
+                    set.add(m.author);
+                  }
+                });
+                bubbles.forEach(b => b.contributors.forEach(c => {
+                  if (c && c !== 'unknown' && c !== 'Distilled') set.add(c);
+                }));
+                return Array.from(set);
+              })();
+              if (detected.length === 0) return null;
+              return (
               <div>
                 <div className="text-[9px] font-mono font-bold text-white/80 uppercase tracking-[0.2em] mb-2">Speakers</div>
                 <div className="space-y-1.5">
-                  {Array.from(new Set<string>(bubbles.flatMap(b => b.contributors)))
-                    .filter(c => c && c !== 'unknown' && c !== 'Distilled')
-                    .map(contributor => {
+                  {detected.map(contributor => {
                       const color = getAuthorBg(contributor);
                       const isFiltering = speakerFilter === contributor;
                       const isEditing = editingContributor === contributor;
@@ -1360,7 +1378,8 @@ export default function App() {
                 </div>
                 <div className="mt-2 text-[8px] text-white/60 italic">Click pencil to rename · click name to filter</div>
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
@@ -1893,9 +1912,21 @@ export default function App() {
                                 </>
                               )}
                               {viewMode === 'original' && (() => {
-                                const allContribs = Array.from(new Set<string>(bubbles.flatMap(b => b.contributors)))
-                                  .filter(c => c && c !== 'unknown' && c !== 'Distilled');
-                                const humans = allContribs.filter(c => !c.includes('AI')).sort();
+                                // Source from BOTH messages and bubble contributors so freshly
+                                // detected speakers appear immediately (before the 8s analyzer
+                                // pass creates a bubble for them).
+                                const set = new Set<string>();
+                                messages.forEach(m => {
+                                  if (m.author && m.author !== 'unknown' && m.author !== 'Distilled'
+                                      && m.author !== 'Query' && m.author !== 'Uploaded Transcript') {
+                                    set.add(m.author);
+                                  }
+                                });
+                                bubbles.forEach(b => b.contributors.forEach(c => {
+                                  if (c && c !== 'unknown' && c !== 'Distilled') set.add(c);
+                                }));
+                                const allContribs = Array.from(set);
+                                const humans = allContribs.filter(c => !c.includes('AI'));
                                 const aiContribs = allContribs.filter(c => c.includes('AI')).sort();
                                 return (
                                   <>
