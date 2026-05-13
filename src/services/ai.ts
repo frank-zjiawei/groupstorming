@@ -538,9 +538,11 @@ export async function evaluateCollaborationHealth(
   messages: Message[],
   context: string,
   elapsedSeconds: number,
+  bypassGuards = false,
 ): Promise<CollaborationNudge | null> {
   // Skip if too few messages or session too short
-  if (messages.length < 8 || elapsedSeconds < 60 * 10) return null;
+  if (!bypassGuards && (messages.length < 8 || elapsedSeconds < 60 * 10)) return null;
+  if (messages.length === 0) return null;
 
   const transcript = transcriptOf(messages);
   const elapsedMin = Math.round(elapsedSeconds / 60);

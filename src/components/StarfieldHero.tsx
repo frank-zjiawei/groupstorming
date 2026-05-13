@@ -1,8 +1,122 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
+import { Volume2, VolumeX } from 'lucide-react';
 
 interface StarfieldHeroProps {
   onBegin: () => void;
+}
+
+/**
+ * Tries to start an HTMLAudio element pointing at /cosmic-ambient.mp3 first.
+ * If that file is missing (404 / decode error), falls back to a procedural
+ * Web Audio synth drone — a slow A-minor chord with detuning LFOs through a
+ * lowpass filter. Either way the result is an ambient cosmic bed that fades
+ * in gently so it never jumps at the user.
+ */
+function createAmbientLayer(): { stop: () => void; setMuted: (muted: boolean) => void } {
+  let stopped = false;
+  let mutedFlag = false;
+  let htmlAudio: HTMLAudioElement | null = null;
+  let audioCtx: AudioContext | null = null;
+  let masterGain: GainNode | null = null;
+  let synthNodes: { osc: OscillatorNode; lfo: OscillatorNode }[] = [];
+  const TARGET_VOL = 0.32;
+
+  const startSynth = () => {
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0;
+      masterGain.connect(audioCtx.destination);
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 900;
+      filter.Q.value = 0.5;
+      filter.connect(masterGain);
+
+      // Soft A minor 7-ish chord — gentle, contemplative, "space" tonality
+      const freqs = [110, 164.81, 220, 277.18, 329.63];
+      freqs.forEach((freq, i) => {
+        const osc = audioCtx!.createOscillator();
+        osc.type = i % 2 === 0 ? 'sine' : 'triangle';
+        osc.frequency.value = freq;
+
+        // Slow vibrato per voice for shimmer
+        const lfo = audioCtx!.createOscillator();
+        lfo.frequency.value = 0.04 + Math.random() * 0.06; // 0.04-0.10 Hz
+        const lfoGain = audioCtx!.createGain();
+        lfoGain.gain.value = 1.2 + Math.random() * 1.5;
+        lfo.connect(lfoGain).connect(osc.frequency);
+
+        const oscGain = audioCtx!.createGain();
+        oscGain.gain.value = 0.13 - i * 0.012; // upper voices quieter
+        osc.connect(oscGain).connect(filter);
+
+        osc.start();
+        lfo.start();
+        synthNodes.push({ osc, lfo });
+      });
+
+      // 6-second fade in
+      masterGain.gain.setTargetAtTime(mutedFlag ? 0 : TARGET_VOL, audioCtx.currentTime, 2);
+    } catch (err) {
+      console.warn('Synth ambient failed:', err);
+    }
+  };
+
+  // Try the MP3 first
+  htmlAudio = new Audio('/cosmic-ambient.mp3');
+  htmlAudio.loop = true;
+  htmlAudio.volume = 0;
+  htmlAudio.preload = 'auto';
+
+  const playPromise = htmlAudio.play();
+  if (playPromise) {
+    playPromise.then(() => {
+      if (stopped) { htmlAudio?.pause(); return; }
+      // Fade in over ~3s
+      let v = 0;
+      const fadeId = window.setInterval(() => {
+        if (!htmlAudio || stopped) { window.clearInterval(fadeId); return; }
+        v = Math.min(TARGET_VOL, v + TARGET_VOL / 30);
+        htmlAudio.volume = mutedFlag ? 0 : v;
+        if (v >= TARGET_VOL) window.clearInterval(fadeId);
+      }, 100);
+    }).catch(() => {
+      // MP3 not present or autoplay denied — fall back to synth
+      htmlAudio?.pause();
+      htmlAudio = null;
+      if (!stopped) startSynth();
+    });
+  }
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (htmlAudio) {
+        try { htmlAudio.pause(); } catch {}
+        htmlAudio.src = '';
+        htmlAudio = null;
+      }
+      if (audioCtx && masterGain) {
+        try {
+          masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
+          window.setTimeout(() => {
+            synthNodes.forEach(({ osc, lfo }) => { try { osc.stop(); lfo.stop(); } catch {} });
+            try { audioCtx?.close(); } catch {}
+          }, 1000);
+        } catch {}
+      }
+    },
+    setMuted: (muted: boolean) => {
+      mutedFlag = muted;
+      if (htmlAudio) htmlAudio.volume = muted ? 0 : TARGET_VOL;
+      if (audioCtx && masterGain) {
+        masterGain.gain.setTargetAtTime(muted ? 0 : TARGET_VOL, audioCtx.currentTime, 0.5);
+      }
+    },
+  };
 }
 
 interface Dot {
@@ -48,6 +162,37 @@ export function StarfieldHero({ onBegin }: StarfieldHeroProps) {
   const dotsRef = useRef<Dot[]>([]);
   const mouseRef = useRef<{ x: number; y: number; active: boolean }>({ x: -10000, y: -10000, active: false });
   const rafRef = useRef<number>(0);
+  const ambientRef = useRef<{ stop: () => void; setMuted: (m: boolean) => void } | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [audioStarted, setAudioStarted] = useState(false);
+
+  // Audio: start cosmic ambient bed on first mouse move (browser autoplay
+  // policies require user interaction). Cleans up automatically on unmount.
+  useEffect(() => {
+    const onFirstInteraction = () => {
+      if (ambientRef.current) return;
+      ambientRef.current = createAmbientLayer();
+      setAudioStarted(true);
+    };
+    window.addEventListener('mousemove', onFirstInteraction, { once: true });
+    window.addEventListener('touchstart', onFirstInteraction, { once: true });
+    window.addEventListener('keydown', onFirstInteraction, { once: true });
+
+    return () => {
+      window.removeEventListener('mousemove', onFirstInteraction);
+      window.removeEventListener('touchstart', onFirstInteraction);
+      window.removeEventListener('keydown', onFirstInteraction);
+      if (ambientRef.current) {
+        ambientRef.current.stop();
+        ambientRef.current = null;
+      }
+    };
+  }, []);
+
+  // Reflect mute toggle into the audio layer
+  useEffect(() => {
+    if (ambientRef.current) ambientRef.current.setMuted(muted);
+  }, [muted]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -187,6 +332,17 @@ export function StarfieldHero({ onBegin }: StarfieldHeroProps) {
       onClick={onBegin}
     >
       <canvas ref={canvasRef} className="absolute inset-0" />
+
+      {/* Mute toggle — only shows once audio has actually started */}
+      {audioStarted && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setMuted(prev => !prev); }}
+          className="absolute top-5 right-5 z-50 p-2.5 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white/70 hover:text-white transition-colors pointer-events-auto"
+          title={muted ? 'Unmute ambient music' : 'Mute ambient music'}
+        >
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

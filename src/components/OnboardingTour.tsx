@@ -66,9 +66,9 @@ interface Rect {
   height: number;
 }
 
-const CARD_WIDTH = 340;
-const CARD_HEIGHT = 220;
 const GAP = 16;
+const cardWidth = () => Math.min(340, (typeof window !== 'undefined' ? window.innerWidth - 32 : 340));
+const cardHeight = () => 220;
 
 function placeCaption(rect: Rect, preferred: Step['preferred']): { top: number; left: number } {
   const vw = window.innerWidth;
@@ -79,26 +79,26 @@ function placeCaption(rect: Rect, preferred: Step['preferred']): { top: number; 
     let left = 0, top = 0;
     if (dir === 'right') {
       left = rect.left + rect.width + GAP;
-      top = rect.top + rect.height / 2 - CARD_HEIGHT / 2;
+      top = rect.top + rect.height / 2 - cardHeight() / 2;
     } else if (dir === 'left') {
-      left = rect.left - CARD_WIDTH - GAP;
-      top = rect.top + rect.height / 2 - CARD_HEIGHT / 2;
+      left = rect.left - cardWidth() - GAP;
+      top = rect.top + rect.height / 2 - cardHeight() / 2;
     } else if (dir === 'top') {
-      left = rect.left + rect.width / 2 - CARD_WIDTH / 2;
-      top = rect.top - CARD_HEIGHT - GAP;
+      left = rect.left + rect.width / 2 - cardWidth() / 2;
+      top = rect.top - cardHeight() - GAP;
     } else {
-      left = rect.left + rect.width / 2 - CARD_WIDTH / 2;
+      left = rect.left + rect.width / 2 - cardWidth() / 2;
       top = rect.top + rect.height + GAP;
     }
-    if (left >= 12 && top >= 12 && left + CARD_WIDTH <= vw - 12 && top + CARD_HEIGHT <= vh - 12) {
+    if (left >= 12 && top >= 12 && left + cardWidth() <= vw - 12 && top + cardHeight() <= vh - 12) {
       return { top, left };
     }
   }
 
   // Fallback: clamp into viewport
   return {
-    top: Math.max(12, Math.min(vh - CARD_HEIGHT - 12, rect.top + rect.height + GAP)),
-    left: Math.max(12, Math.min(vw - CARD_WIDTH - 12, rect.left)),
+    top: Math.max(12, Math.min(vh - cardHeight() - 12, rect.top + rect.height + GAP)),
+    left: Math.max(12, Math.min(vw - cardWidth() - 12, rect.left)),
   };
 }
 
@@ -196,7 +196,7 @@ export function OnboardingTour({ onDismiss }: OnboardingTourProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
         className="absolute bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/40 p-5 pointer-events-auto"
-        style={{ top: caption.top, left: caption.left, width: CARD_WIDTH }}
+        style={{ top: caption.top, left: caption.left, width: cardWidth() }}
       >
         <button
           onClick={finish}

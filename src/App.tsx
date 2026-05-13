@@ -105,8 +105,26 @@ export default function App() {
   // Footer "More" stack popup (Run Sample / Transcript)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
-  // Collapsible left sidebar
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Collapsible left sidebar — defaults collapsed on mobile, expanded on desktop
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768;
+  });
+  // Track viewport width so we can keep the collapse state sensible on resize
+  // (going desktop→mobile collapses; mobile→desktop reopens if it was open before).
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => {
+      const nowMobile = window.innerWidth < 768;
+      if (nowMobile !== isMobile) {
+        setIsMobile(nowMobile);
+        // When crossing into mobile, collapse the sidebar to give the canvas full width
+        if (nowMobile) setSidebarCollapsed(true);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [isMobile]);
 
   // First-run onboarding tour (4-step intro). Skipped if user has seen it before.
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -647,6 +665,33 @@ export default function App() {
     });
   };
 
+  const [isTestingCoach, setIsTestingCoach] = useState(false);
+  const handleTestCoach = async () => {
+    if (isTestingCoach || coachRunningRef.current) return;
+    const { messages: m, context: c, elapsedSeconds: e } = coachInputRef.current;
+    if (m.length === 0) {
+      setError({ title: 'No transcript yet', message: 'Run sample data first, then click Test Coach.' });
+      return;
+    }
+    setIsTestingCoach(true);
+    coachRunningRef.current = true;
+    try {
+      const nudge = await evaluateCollaborationHealth(m, c, e, true);
+      if (nudge) {
+        setActiveNudge(nudge);
+        lastNudgeTimeRef.current = Date.now();
+      } else {
+        setError({ title: 'Coach says: all good!', message: 'The AI evaluated the conversation and found no intervention needed right now.' });
+      }
+    } catch (err: any) {
+      console.error('Test coach error:', err);
+      setError({ title: 'Coach error', message: err?.message || 'Unknown error — check the console.' });
+    } finally {
+      setIsTestingCoach(false);
+      coachRunningRef.current = false;
+    }
+  };
+
   const { isConnected, connect, disconnect, interimTranscript, connectError, clearConnectError } = useLiveAgent(
     handleNewTranscription,
     () => '', // unused — Deepgram provides speaker labels directly
@@ -1168,7 +1213,7 @@ export default function App() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -8 }}
             onClick={() => setSidebarCollapsed(false)}
-            className="fixed top-4 left-4 z-50 w-9 h-9 rounded-xl bg-white shadow-lg border border-zinc-200 flex items-center justify-center text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
+            className="fixed top-4 left-4 z-50 w-10 h-10 rounded-xl bg-white shadow-lg border border-zinc-200 flex items-center justify-center text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 transition-colors"
             title="Show transcript panel"
           >
             <PanelLeftOpen className="w-4 h-4" />
@@ -1176,11 +1221,33 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* LEFT PANEL / SIDEBAR */}
+      {/* MOBILE BACKDROP — dim + tap-to-close while sidebar is open on small screens */}
+      <AnimatePresence>
+        {!sidebarCollapsed && isMobile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSidebarCollapsed(true)}
+            className="fixed inset-0 z-40 bg-zinc-900/40 backdrop-blur-[2px] md:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* LEFT PANEL / SIDEBAR
+          Desktop: flex column in document flow, marginLeft animates -320 → 0 to push the right panel.
+          Mobile : fixed overlay drawer, translateX animates -100% → 0. */}
       <motion.div
-        animate={{ marginLeft: sidebarCollapsed ? -320 : 0 }}
-        transition={{ duration: 0.22, ease: 'easeInOut' }}
-        className="w-80 flex flex-col border-r border-white/40 bg-white/75 backdrop-blur-2xl relative shrink-0 z-10"
+        animate={isMobile
+          ? { x: sidebarCollapsed ? '-100%' : '0%' }
+          : { marginLeft: sidebarCollapsed ? -320 : 0, x: 0 }}
+        transition={{ duration: 0.24, ease: 'easeInOut' }}
+        className="
+          w-[85vw] max-w-[320px] md:w-80
+          flex flex-col border-r border-white/40 bg-white/75 backdrop-blur-2xl
+          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-2xl
+          md:relative md:shrink-0 z-10
+        "
       >
 
         {/* MIC CONNECTION ERROR */}
@@ -1644,6 +1711,18 @@ export default function App() {
                         <Sparkles className="w-4 h-4 text-zinc-500 shrink-0" />
                         <span>Show intro tour</span>
                       </button>
+                      <div className="h-px bg-zinc-100 my-1" />
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); setCoachEnabled(true); handleTestCoach(); }}
+                        disabled={isTestingCoach || messages.length === 0}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-[13px] font-medium text-zinc-800 hover:bg-amber-50 rounded-lg transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                      >
+                        {isTestingCoach
+                          ? <Loader2 className="w-4 h-4 text-amber-500 shrink-0 animate-spin" />
+                          : <HeartHandshake className="w-4 h-4 text-amber-500 shrink-0" />
+                        }
+                        <span>Test Coach now</span>
+                      </button>
                     </motion.div>
                   </>
                 )}
@@ -1733,13 +1812,17 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <div className="px-6 py-4 border-b border-white/40 flex flex-col gap-3 bg-white/60 backdrop-blur-xl shrink-0">
-          
-           <div data-onboarding="tabs" className="flex items-start gap-4">
-             <div className="flex flex-col gap-1">
+        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-white/40 flex flex-col gap-3 bg-white/60 backdrop-blur-xl shrink-0">
+
+           <div
+             data-onboarding="tabs"
+             className="flex items-start gap-2 sm:gap-4 overflow-x-auto no-scrollbar pl-12 md:pl-0 pr-2"
+             style={{ scrollbarWidth: 'none' }}
+           >
+             <div className="flex flex-col gap-1 shrink-0">
                 <button
                   onClick={() => setActiveView('bubbles')}
-                  className={`text-sm font-bold px-4 py-2 rounded-lg transition-all ${activeView === 'bubbles' ? 'bg-[#9ab7d3] text-white' : 'bg-[#9ab7d3]/10 text-zinc-500 hover:bg-[#9ab7d3]/20 hover:text-zinc-800'}`}
+                  className={`text-xs sm:text-sm font-bold px-3 sm:px-4 py-2 rounded-lg transition-all whitespace-nowrap ${activeView === 'bubbles' ? 'bg-[#9ab7d3] text-white' : 'bg-[#9ab7d3]/10 text-zinc-500 hover:bg-[#9ab7d3]/20 hover:text-zinc-800'}`}
                 >
                    <div className="flex items-center gap-2">
                       <MessageCircle className="w-4 h-4" />
@@ -1747,16 +1830,16 @@ export default function App() {
                    </div>
                 </button>
                 {activeView === 'bubbles' && (
-                  <p className="text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
+                  <p className="hidden md:block text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
                     Live visualization of your brainstorming branching.
                   </p>
                 )}
              </div>
 
-             <div className="flex flex-col gap-1">
-                <button 
+             <div className="flex flex-col gap-1 shrink-0">
+                <button
                   onClick={() => setActiveView('timeline')}
-                  className={`text-sm font-bold px-4 py-2 rounded-lg transition-all ${activeView === 'timeline' ? 'bg-[#f5d2d3] text-zinc-900' : 'bg-[#f5d2d3]/20 text-zinc-500 hover:bg-[#f5d2d3]/30 hover:text-zinc-800'}`}
+                  className={`text-xs sm:text-sm font-bold px-3 sm:px-4 py-2 rounded-lg transition-all whitespace-nowrap ${activeView === 'timeline' ? 'bg-[#f5d2d3] text-zinc-900' : 'bg-[#f5d2d3]/20 text-zinc-500 hover:bg-[#f5d2d3]/30 hover:text-zinc-800'}`}
                 >
                    <div className="flex items-center gap-2">
                       <GitCommitHorizontal className="w-4 h-4" />
@@ -1764,41 +1847,41 @@ export default function App() {
                    </div>
                 </button>
                 {activeView === 'timeline' && (
-                  <p className="text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
+                  <p className="hidden md:block text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
                     How ideas and focuses develop chronologically.
                   </p>
                 )}
              </div>
 
-             <div className="flex flex-col gap-1">
-                <button 
+             <div className="flex flex-col gap-1 shrink-0">
+                <button
                   onClick={() => setActiveView('matrix')}
-                  className={`text-sm font-bold px-4 py-2 rounded-lg transition-all ${activeView === 'matrix' ? 'bg-[#f7e1d3] text-zinc-900' : 'bg-[#f7e1d3]/20 text-zinc-500 hover:bg-[#f7e1d3]/30 hover:text-zinc-800'}`}
+                  className={`text-xs sm:text-sm font-bold px-3 sm:px-4 py-2 rounded-lg transition-all whitespace-nowrap ${activeView === 'matrix' ? 'bg-[#f7e1d3] text-zinc-900' : 'bg-[#f7e1d3]/20 text-zinc-500 hover:bg-[#f7e1d3]/30 hover:text-zinc-800'}`}
                 >
                    <div className="flex items-center gap-2">
                       <BarChart className="w-4 h-4" />
-                      Evaluation Matrix
+                      <span className="hidden sm:inline">Evaluation </span>Matrix
                    </div>
                 </button>
                 {activeView === 'matrix' && (
-                  <p className="text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
+                  <p className="hidden md:block text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
                     How the ideas fit in the Impact-Effort Matrix.
                   </p>
                 )}
              </div>
 
-             <div className="flex flex-col gap-1">
-                <button 
+             <div className="flex flex-col gap-1 shrink-0">
+                <button
                   onClick={() => setActiveView('report')}
-                  className={`text-sm font-bold px-4 py-2 rounded-lg transition-all ${activeView === 'report' ? 'bg-[#bdd0c4] text-zinc-900' : 'bg-[#bdd0c4]/20 text-zinc-500 hover:bg-[#bdd0c4]/30 hover:text-zinc-800'}`}
+                  className={`text-xs sm:text-sm font-bold px-3 sm:px-4 py-2 rounded-lg transition-all whitespace-nowrap ${activeView === 'report' ? 'bg-[#bdd0c4] text-zinc-900' : 'bg-[#bdd0c4]/20 text-zinc-500 hover:bg-[#bdd0c4]/30 hover:text-zinc-800'}`}
                 >
                    <div className="flex items-center gap-2">
                       <FileText className="w-4 h-4" />
-                      Meeting Report
+                      <span className="hidden sm:inline">Meeting </span>Report
                    </div>
                 </button>
                 {activeView === 'report' && (
-                  <p className="text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
+                  <p className="hidden md:block text-[11px] text-zinc-500 pl-1 font-medium animate-in fade-in slide-in-from-top-1 duration-300">
                     Comprehensive summary and rubric analysis.
                   </p>
                 )}
@@ -1806,7 +1889,7 @@ export default function App() {
            </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 lg:p-10 flex flex-col gap-10 relative">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-10 flex flex-col gap-6 sm:gap-10 relative">
           
           <AnimatePresence>
           </AnimatePresence>
@@ -1814,8 +1897,8 @@ export default function App() {
           {activeView === 'bubbles' && (
              <div className="w-full h-full flex flex-col relative">
                 {/* CANVAS TOOLBAR — search/filter on left, consolidate on right */}
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0">
                     <button
                       onClick={() => {
                         setCanvasSearchOpen(prev => !prev);
@@ -1994,14 +2077,14 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     {viewMode === 'distilled' && (
-                      <span className="text-[10px] font-mono text-amber-700 uppercase tracking-widest">
+                      <span className="hidden md:inline text-[10px] font-mono text-amber-700 uppercase tracking-widest">
                         Viewing consolidated findings
                       </span>
                     )}
                     {viewMode === 'original' && (
-                      <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
+                      <span className="hidden md:inline text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
                         {bubbles.length < 2 ? 'Add 2+ bubbles' : (distilledBubbles ? 'Re-run consolidation →' : 'Consolidate findings →')}
                       </span>
                     )}
